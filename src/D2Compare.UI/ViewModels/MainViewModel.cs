@@ -98,14 +98,15 @@ public partial class MainViewModel : ObservableObject
 
     public AppSettings Settings => _settings;
     private readonly AppSettings _settings;
+    private readonly IReadOnlyList<VersionInfo> _availableVersions;
 
     private string _sourceFolderPath = "";
     private string _targetFolderPath = "";
     private List<CompareResult> _batchResults = new();
 
     public string AppVersion => UpdateService.GetCurrentVersion();
-    public bool IsSourceCustom => SelectedSourceIndex >= VersionInfo.BuiltInVersions.Length;
-    public bool IsTargetCustom => SelectedTargetIndex >= VersionInfo.BuiltInVersions.Length;
+    public bool IsSourceCustom => SelectedSourceIndex >= _availableVersions.Count;
+    public bool IsTargetCustom => SelectedTargetIndex >= _availableVersions.Count;
 
     // Auto-update
     [ObservableProperty] private UpdateInfo? _pendingUpdate;
@@ -132,13 +133,15 @@ public partial class MainViewModel : ObservableObject
         if (IsDarkMode && Avalonia.Application.Current is { } app)
             app.RequestedThemeVariant = ThemeVariant.Dark;
 
-        var names = VersionInfo.BuiltInVersions.Select(v => v.DisplayName).ToList();
+        _availableVersions = VersionInfo.GetAvailableVersions();
+
+        var names = _availableVersions.Select(v => v.DisplayName).ToList();
         names.Add("Custom");
 
         SourceVersions = new ObservableCollection<string>(names);
         TargetVersions = new ObservableCollection<string>(names);
 
-        var customIndex = VersionInfo.BuiltInVersions.Length;
+        var customIndex = _availableVersions.Count;
 
         // Restore custom paths before setting indices (only if directory still exists)
         if (!string.IsNullOrEmpty(_settings.CustomSourcePath) && Directory.Exists(_settings.CustomSourcePath))
@@ -190,8 +193,8 @@ public partial class MainViewModel : ObservableObject
     {
         if (value < 0) return;
 
-        if (value < VersionInfo.BuiltInVersions.Length)
-            _sourceFolderPath = VersionInfo.BuiltInVersions[value].GetPath();
+        if (value < _availableVersions.Count)
+            _sourceFolderPath = _availableVersions[value].GetPath();
         else if (!string.IsNullOrEmpty(_settings.CustomSourcePath))
             _sourceFolderPath = _settings.CustomSourcePath;
 
@@ -204,8 +207,8 @@ public partial class MainViewModel : ObservableObject
     {
         if (value < 0) return;
 
-        if (value < VersionInfo.BuiltInVersions.Length)
-            _targetFolderPath = VersionInfo.BuiltInVersions[value].GetPath();
+        if (value < _availableVersions.Count)
+            _targetFolderPath = _availableVersions[value].GetPath();
         else if (!string.IsNullOrEmpty(_settings.CustomTargetPath))
             _targetFolderPath = _settings.CustomTargetPath;
 
@@ -628,26 +631,30 @@ public partial class MainViewModel : ObservableObject
         if (folders.Count > 0)
         {
             var path = folders[0].Path.LocalPath;
-            var customIndex = VersionInfo.BuiltInVersions.Length;
+            var customIndex = _availableVersions.Count;
 
             if (isSource)
             {
                 _sourceFolderPath = path;
                 SourceVersions[customIndex] = path;
-                SelectedSourceIndex = customIndex;
                 _settings.SelectedSourceIndex = customIndex;
                 _settings.CustomSourcePath = path;
                 _settings.Save();
+                SelectedSourceIndex = customIndex;
+                OnPropertyChanged(nameof(IsSourceCustom));
             }
             else
             {
                 _targetFolderPath = path;
                 TargetVersions[customIndex] = path;
-                SelectedTargetIndex = customIndex;
                 _settings.SelectedTargetIndex = customIndex;
                 _settings.CustomTargetPath = path;
                 _settings.Save();
+                SelectedTargetIndex = customIndex;
+                OnPropertyChanged(nameof(IsTargetCustom));
             }
+
+            OnTargetChanged();
         }
     }
 
@@ -765,7 +772,7 @@ public partial class MainViewModel : ObservableObject
 
     public void InitializeFromArguments(string? sourceFolder, string? targetFolder, string? filePath)
     {
-        var customIndex = VersionInfo.BuiltInVersions.Length;
+        var customIndex = _availableVersions.Count;
 
         if (!string.IsNullOrWhiteSpace(sourceFolder) && Directory.Exists(sourceFolder))
         {

@@ -2,7 +2,7 @@ namespace D2Compare.Core.Models;
 
 public record VersionInfo(string DisplayName, string FolderName)
 {
-    public static readonly VersionInfo[] BuiltInVersions =
+    private static readonly VersionInfo[] KnownVersions =
     [
         new("Legacy (1.13c+)", "113c"),
         new("1.0.0.0 (62115)", "62115"),
@@ -27,5 +27,49 @@ public record VersionInfo(string DisplayName, string FolderName)
         new("3.0.0.0 (91636) - Expansion", "91636b"),
     ];
 
-    public string GetPath() => Path.Combine("TXT", FolderName);
+    public static IReadOnlyList<VersionInfo> GetAvailableVersions()
+    {
+        var txtRoot = GetTxtRootPath();
+        if (!Directory.Exists(txtRoot))
+            return KnownVersions;
+
+        var knownByFolder = KnownVersions.ToDictionary(v => v.FolderName, StringComparer.OrdinalIgnoreCase);
+        var discoveredFolders = Directory.GetDirectories(txtRoot)
+            .Select(Path.GetFileName)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Cast<string>()
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var ordered = new List<VersionInfo>();
+
+        foreach (var knownVersion in KnownVersions)
+        {
+            if (discoveredFolders.Contains(knownVersion.FolderName))
+                ordered.Add(knownVersion);
+        }
+
+        var extraVersions = discoveredFolders
+            .Where(folderName => !knownByFolder.ContainsKey(folderName))
+            .OrderBy(folderName => folderName, StringComparer.OrdinalIgnoreCase)
+            .Select(folderName => new VersionInfo(folderName, folderName));
+
+        ordered.AddRange(extraVersions);
+
+        return ordered;
+    }
+
+    public string GetPath() => Path.Combine(GetTxtRootPath(), FolderName);
+
+    private static string GetTxtRootPath()
+    {
+        var candidates = new[]
+        {
+            Path.Combine(Environment.CurrentDirectory, "TXT"),
+            Path.Combine(AppContext.BaseDirectory, "TXT"),
+            "TXT",
+        };
+
+        return candidates.FirstOrDefault(Directory.Exists)
+            ?? Path.Combine(Environment.CurrentDirectory, "TXT");
+    }
 }

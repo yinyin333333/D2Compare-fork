@@ -66,25 +66,35 @@ public static class CompareService
             .ToList();
 
         // Row diffs
-        var addedRowsTask = Task.Run(() => targetData[rowHeaderColumn].Except(sourceData[rowHeaderColumn]).ToList());
-        var removedRowsDict = DiffEngine.GetRemovedRows(sourceData, targetData, rowHeaderColumn);
+        var sourceRowKeys = RowInstanceKeyHelper.BuildKeys(sourceData[rowHeaderColumn]);
+        var targetRowKeys = RowInstanceKeyHelper.BuildKeys(targetData[rowHeaderColumn]);
+
+        var addedRowsTask = Task.Run(() => targetRowKeys.Except(sourceRowKeys).ToList());
+        var removedRowsDict = DiffEngine.GetRemovedRows(sourceRowKeys, targetRowKeys);
         var allRemovedRows = DiffEngine.ExpandCounts(removedRowsDict);
         var addedRows = addedRowsTask.Result;
 
+        var sourceRowIndexMap = sourceRowKeys
+            .Select((key, index) => new { key, index })
+            .ToDictionary(x => x.key, x => x.index);
+        var targetRowIndexMap = targetRowKeys
+            .Select((key, index) => new { key, index })
+            .ToDictionary(x => x.key, x => x.index);
+
         // Identify row renames
         var changedRows = new List<string>();
-        var processedAdded = new HashSet<string>();
-        var processedRemoved = new HashSet<string>();
+        var processedAdded = new HashSet<RowInstanceKey>();
+        var processedRemoved = new HashSet<RowInstanceKey>();
 
         foreach (var added in addedRows)
         {
             foreach (var removed in allRemovedRows)
             {
                 if (!processedAdded.Contains(added) && !processedRemoved.Contains(removed) &&
-                    SchemaFixProvider.IsKnownRename(added, removed, sourcePath))
+                    SchemaFixProvider.IsKnownRename(added.Name, removed.Name, sourcePath))
                 {
-                    var srcRow = sourceData[rowHeaderColumn].IndexOf(removed) + 1;
-                    changedRows.Add($"(Row {srcRow}) {removed} -> {added}");
+                    var srcRow = sourceRowIndexMap[removed] + 1;
+                    changedRows.Add($"(Row {srcRow}) {removed.Name} -> {added.Name}");
                     processedAdded.Add(added);
                     processedRemoved.Add(removed);
                 }
@@ -97,8 +107,8 @@ public static class CompareService
             {
                 if (!processedAdded.Contains(added) && !processedRemoved.Contains(removed))
                 {
-                    var srcRow = sourceData[rowHeaderColumn].IndexOf(removed) + 1;
-                    changedRows.Add($"(Row {srcRow}) {removed} -> {added}");
+                    var srcRow = sourceRowIndexMap[removed] + 1;
+                    changedRows.Add($"(Row {srcRow}) {removed.Name} -> {added.Name}");
                     processedAdded.Add(added);
                     processedRemoved.Add(removed);
                 }
@@ -107,11 +117,11 @@ public static class CompareService
 
         var finalAddedRows = addedRows
             .Where(r => !processedAdded.Contains(r))
-            .Select(r => $"(Row {targetData[rowHeaderColumn].IndexOf(r) + 1}) {r}")
+            .Select(r => $"(Row {targetRowIndexMap[r] + 1}) {r.Name}")
             .ToList();
         var finalRemovedRows = allRemovedRows
             .Where(r => !processedRemoved.Contains(r))
-            .Select(r => $"(Row {sourceData[rowHeaderColumn].IndexOf(r) + 1}) {r}")
+            .Select(r => $"(Row {sourceRowIndexMap[r] + 1}) {r.Name}")
             .ToList();
 
         // Value-level diffs

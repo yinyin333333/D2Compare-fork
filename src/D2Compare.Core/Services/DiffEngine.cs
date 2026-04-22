@@ -6,14 +6,14 @@ namespace D2Compare.Core.Services;
 
 public static class DiffEngine
 {
-    public static Dictionary<string, int> GetRemovedRows(
-        Dictionary<string, List<string>> file1Data,
-        Dictionary<string, List<string>> file2Data,
-        string rowHeaderColumn)
+    public static Dictionary<T, int> GetRemovedRows<T>(
+        IReadOnlyList<T> file1Rows,
+        IReadOnlyList<T> file2Rows)
+        where T : notnull
     {
-        var removedRows = new Dictionary<string, int>();
+        var removedRows = new Dictionary<T, int>();
 
-        foreach (var row in file1Data[rowHeaderColumn])
+        foreach (var row in file1Rows)
         {
             if (removedRows.ContainsKey(row))
                 removedRows[row]++;
@@ -21,7 +21,7 @@ public static class DiffEngine
                 removedRows[row] = 1;
         }
 
-        foreach (var row in file2Data[rowHeaderColumn])
+        foreach (var row in file2Rows)
         {
             if (removedRows.ContainsKey(row))
             {
@@ -34,9 +34,10 @@ public static class DiffEngine
         return removedRows;
     }
 
-    public static List<string> ExpandCounts(Dictionary<string, int> dictionary)
+    public static List<T> ExpandCounts<T>(Dictionary<T, int> dictionary)
+        where T : notnull
     {
-        var list = new List<string>();
+        var list = new List<T>();
         foreach (var kvp in dictionary)
         {
             for (int i = 0; i < kvp.Value; i++)
@@ -62,28 +63,30 @@ public static class DiffEngine
             headerIndexMap[headerList[i]] = i;
 
         // Build row index lookups to avoid O(n) IndexOf per column
-        var file1RowIndices = new Dictionary<string, int>();
         var file1Rows = file1Data[rowHeaderColumn];
-        for (int i = 0; i < file1Rows.Count; i++)
-            file1RowIndices.TryAdd(file1Rows[i], i);
+        var file1RowKeys = RowInstanceKeyHelper.BuildKeys(file1Rows);
+        var file1RowIndices = new Dictionary<RowInstanceKey, int>();
+        for (int i = 0; i < file1RowKeys.Count; i++)
+            file1RowIndices[file1RowKeys[i]] = i;
 
-        var file2RowIndices = new Dictionary<string, int>();
         var file2Rows = file2Data[rowHeaderColumn];
-        for (int i = 0; i < file2Rows.Count; i++)
-            file2RowIndices.TryAdd(file2Rows[i], i);
+        var file2RowKeys = RowInstanceKeyHelper.BuildKeys(file2Rows);
+        var file2RowIndices = new Dictionary<RowInstanceKey, int>();
+        for (int i = 0; i < file2RowKeys.Count; i++)
+            file2RowIndices[file2RowKeys[i]] = i;
 
-        var allRowHeaders = new HashSet<string>(file1Rows);
-        allRowHeaders.UnionWith(file2Rows);
+        var allRowHeaders = new HashSet<RowInstanceKey>(file1RowKeys);
+        allRowHeaders.UnionWith(file2RowKeys);
 
-        Parallel.ForEach(allRowHeaders, rowHeader =>
+        Parallel.ForEach(allRowHeaders, rowKey =>
         {
-            bool inFile1 = file1RowIndices.ContainsKey(rowHeader);
-            bool inFile2 = file2RowIndices.ContainsKey(rowHeader);
+            bool inFile1 = file1RowIndices.ContainsKey(rowKey);
+            bool inFile2 = file2RowIndices.ContainsKey(rowKey);
 
             if (inFile1 && inFile2)
             {
-                int index1 = file1RowIndices[rowHeader];
-                int index2 = file2RowIndices[rowHeader];
+                int index1 = file1RowIndices[rowKey];
+                int index2 = file2RowIndices[rowKey];
 
                 foreach (var header in headerList)
                 {
@@ -96,7 +99,7 @@ public static class DiffEngine
                     if (value1 != value2)
                     {
                         string valueDifference = $"{header}: '{value1}' -> '{value2}'";
-                        string column0Value = $"(Row {Math.Min(index1, index2) + 1}) {rowHeader}";
+                        string column0Value = $"(Row {Math.Min(index1, index2) + 1}) {rowKey.Name}";
                         int columnIndex = headerIndexMap.TryGetValue(header, out var idx) ? idx : 0;
 
                         lock (groupedDifferences)
@@ -111,7 +114,7 @@ public static class DiffEngine
             }
             else if (includeNewRows && !inFile1)
             {
-                if (!file2RowIndices.TryGetValue(rowHeader, out int index2))
+                if (!file2RowIndices.TryGetValue(rowKey, out int index2))
                     return;
 
                 foreach (var header in headerList)
@@ -122,7 +125,7 @@ public static class DiffEngine
                     var value2 = file2Data[header][index2];
 
                     string valueDifference = $"{header}: '{value2}'";
-                    string column0Value = $"(Row {index2 + 1}) {rowHeader}";
+                    string column0Value = $"(Row {index2 + 1}) {rowKey.Name}";
                     int columnIndex = headerIndexMap.TryGetValue(header, out var idx) ? idx : 0;
 
                     lock (groupedDifferences)
